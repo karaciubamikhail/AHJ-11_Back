@@ -1,96 +1,46 @@
-import http from "http";
-import express from "express";
-import WebSocket, { WebSocketServer } from "ws";
-import cors from "cors";
-import bodyParser from "body-parser";
-import * as crypto from "crypto";
+const Koa = require('koa')
+const http = require('http')
+const KoaBody = require('koa-body');
+const router = require('./routers');
+const koaBody = require('koa-body');
 
-const app = express();
+const app = new Koa();
 
-app.use(cors());
-app.use(
-  bodyParser.json({
-    type(req) {
-      return true;
-    },
-  })
-);
-app.use((req, res, next) => {
-  res.setHeader("Content-Type", "application/json");
-  next();
-});
-
-const userState = [];
-app.post("/new-user", async (request, response) => {
-  if (Object.keys(request.body).length === 0) {
-    const result = {
-      status: "error",
-      message: "This name is already taken!",
-    };
-    response.status(400).send(JSON.stringify(result)).end();
+app.use(koaBody({
+  urlencoded:true,
+}))
+app.use((ctx,next) =>{
+  const origin = ctx.request.get('Origin')
+  if(!origin){
+    return next()
   }
-  const { name } = request.body;
-  const isExist = userState.find((user) => user.name === name);
-  if (!isExist) {
-    const newUser = {
-      id: crypto.randomUUID(),
-      name: name,
-    };
-    userState.push(newUser);
-    const result = {
-      status: "ok",
-      user: newUser,
-    };
-    response.send(JSON.stringify(result)).end();
-  } else {
-    const result = {
-      status: "error",
-      message: "This name is already taken!",
-    };
-    response.status(409).send(JSON.stringify(result)).end();
-  }
-});
-app.get("/get-user", async (request, response) => {
-  response.status(200).send(JSON.stringify(userState)).end();
-  })
-const server = http.createServer(app);
-const wsServer = new WebSocketServer({ server });
-wsServer.on("connection", (ws) => {
-  ws.on("message", (msg, isBinary) => {
-    const receivedMSG = JSON.parse(msg);
-    console.dir(receivedMSG);
-    if (receivedMSG.type === "exit") {
-      const idx = userState.findIndex(
-        (user) => user.name === receivedMSG.user.name
-      );
-      userState.splice(idx, 1);
-      [...wsServer.clients]
-        .filter((o) => o.readyState === WebSocket.OPEN)
-        .forEach((o) => o.send(JSON.stringify(userState)));
-      return;
+  const headers = { 'Access-Control-Allow-Origin': '*', };
+  if (ctx.request.method !== 'OPTIONS') {
+    ctx.response.set({ ...headers });
+    try {
+      return next();
+    } catch (e) {
+      e.headers = { ...e.headers, ...headers };
+      throw e;
     }
-    if (receivedMSG.type === "send") {
-      [...wsServer.clients]
-        .filter((o) => o.readyState === WebSocket.OPEN)
-        .forEach((o) => o.send(msg, { binary: isBinary }));
-        console.dir(wsServer.clients);
+  }
+  if (ctx.request.get('Access-Control-Request-Method')) {
+    ctx.response.set({
+      ...headers,
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH',
+    });
+
+    if (ctx.request.get('Access-Control-Request-Headers')) {
+      ctx.response.set('Access-Control-Allow-Headers', ctx.request.get('Access-Control-Request-Headers'));
     }
-  });
-  [...wsServer.clients]
-    .filter((o) => o.readyState === WebSocket.OPEN)
-    .forEach((o) => o.send(JSON.stringify(userState)));
+
+    ctx.response.status = 204;
+  }
 });
 
-const port = process.env.PORT || 3000;
+//TODO: write code here
 
-const bootstrap = async () => {
-  try {
-    server.listen(port, () =>
-      console.log(`Server has been started on http://localhost:${port}`)
-    );
-  } catch (error) {
-    console.error(error);
-  }
-};
-
-bootstrap();
+app.use(router());
+const port = process.env.PORT || 7090;
+const server = http.createServer(app.callback());
+server.listen(port);
